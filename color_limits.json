@@ -1,0 +1,38 @@
+{
+  "GPP_Broadleaf": {
+    "vmin": 0.0,
+    "vmax": 2500.0
+  },
+  "GPP_Needleleaf": {
+    "vmin": 0.0,
+    "vmax": 2000.0
+  },
+  "NEE_Broadleaf": {
+    "vmin": 0.0,
+    "vmax": 1400.0
+  },
+  "NEE_Needleleaf": {
+    "vmin": 0.0,
+    "vmax": 1000.0
+  },
+  "TER_Broadleaf": {
+    "vmin": 0.0,
+    "vmax": 1200.0
+  },
+  "TER_Needleleaf": {
+    "vmin": 0.0,
+    "vmax": 1200.0
+  },
+  "GPP_Forest": {
+    "vmin": 0.0,
+    "vmax": 3000.0
+  },
+  "NEE_Forest": {
+    "vmin": 0.0,
+    "vmax": 2000.0
+  },
+  "TER_Forest": {
+    "vmin": 0.0,
+    "vmax": 2000.0
+  }
+}

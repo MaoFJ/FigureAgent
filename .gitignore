@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+
+# Images
+*.png
+*.jpg
+*.jpeg
+*.svg
+*.bmp
+*.tiff
+*.webp
+*.ico
+
+# GIF (动图)
+*.gif
+
+# Videos (视频)
+*.mp4
+*.avi
+*.mov
+*.webm
+*.mkv
+*.wmv
+*.flv
+
+# Generated output directories
+frames/
+output/
+
+# OS
+.DS_Store
+Thumbs.db
