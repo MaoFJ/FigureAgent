@@ -17,19 +17,21 @@ from tqdm import tqdm
 
 # ── 路径 ──────────────────────────────────────────────
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-FLUXDATA_PATH = PROJECT_ROOT / "data" / "fluxdata.csv"
+FLUXDATA_PATH = PROJECT_ROOT / "data" / "fluxdata_2011-2025.csv"
 FRAMES_DIR = PROJECT_ROOT / "frames" / "flux_ts"
 OUTPUT_DIR = PROJECT_ROOT / "output" / "flux_ts"
 
 # ── 样式常量 ──────────────────────────────────────────
-FIG_DPI = 150
+FIG_DPI = 300
 FIG_WIDTH = 13
 FIG_HEIGHT = 9
 LINE_WIDTH = 1.0
 DOT_SIZE = 4.0
-FRAME_STEP = 3          # 每隔 N 天渲染一帧
+FRAME_STEP = 3          # 每隔 N 天渲染一帧（被 --duration 覆盖时忽略）
+TARGET_DURATION = 10    # 目标 GIF 播放时长（秒）
 GIF_DURATION = 0.12     # 每帧时长（秒）
 GIF_SCALE = 0.5         # GIF 缩放比例
+XAXIS_MODE = "fixed"    # "fixed"=全程固定 | "auto"=X轴随帧扩展
 
 # ── 变量配置（在此处快速调整范围）────────────────────
 #   range: (ymin, ymax) — 时序Y轴 & 散点XY轴 统一
@@ -107,12 +109,14 @@ def render_frame(
     save_path: Path,
     y_limits: dict,
     scatter_limits: dict,
+    xaxis_mode: str = "fixed",
 ) -> None:
     """
     渲染第 idx 行为止的数据。
 
     左列: GPP / TER / NEE 时间序列（Obs 圆点 + Ass 线条）
     右列: Ass vs Obs 散点图（动态累积）
+    xaxis_mode: "fixed" 全程固定 X 轴 | "auto" X 轴随帧扩展
     """
     _setup_style()
 
@@ -130,6 +134,27 @@ def render_frame(
 
     variables = ["GPP", "TER", "NEE"]
     year_starts = pd.date_range(date_min, date_max, freq="YS")
+
+    # 计算统一的 X 轴右边界
+    if xaxis_mode == "auto":
+        xlim_right = current_date + pd.Timedelta(days=30)
+    else:
+        xlim_right = date_max + pd.Timedelta(days=60)
+
+    # 根据当前 X 轴跨度确定刻度间隔
+    span_days = (xlim_right - date_min).days
+    if span_days < 365:
+        interval = 1       # 月
+    elif span_days < 730:
+        interval = 2       # 双月
+    elif span_days < 1460:
+        interval = 3       # 季
+    elif span_days < 2190:
+        interval = 4
+    elif span_days < 3285:
+        interval = 6       # 半年
+    else:
+        interval = 12      # 年
 
     for i, var in enumerate(variables):
         obs_col, ass_col = VAR_COLS[var]
@@ -168,8 +193,14 @@ def render_frame(
         # 刻度
         ax_ts.tick_params(labelsize=8)
         ax_ts.yaxis.set_major_locator(MaxNLocator(nbins=5))
-        # 统一 X 轴范围
-        ax_ts.set_xlim(date_min, date_max)
+        # 统一 X 轴范围与刻度
+        ax_ts.set_xlim(date_min, xlim_right)
+        if span_days >= 3285:
+            ax_ts.xaxis.set_major_locator(mdates.YearLocator())
+            ax_ts.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+        else:
+            ax_ts.xaxis.set_major_locator(mdates.MonthLocator(interval=interval))
+            ax_ts.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
         # 隐藏上方两行时间序列的 X 刻度标签
         if i < 2:
             ax_ts.tick_params(axis="x", labelbottom=False)
@@ -202,20 +233,8 @@ def render_frame(
         ax_sc.tick_params(labelsize=7)
         ax_sc.set_box_aspect(1)
 
-    # ── X 轴格式（最下面一行左列）──────────────────
+    # ── X 轴标签（最下面一行，已在循环内设置locator）───
     ax_ts = axes[-1, 0]
-    ax_ts.set_xlim(date_min, date_max)
-    ax_ts.xaxis.set_major_locator(mdates.MonthLocator(interval=4))
-    ax_ts.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
-    # 强制显示最后一月 "2014-12"
-    from matplotlib.dates import date2num
-    xticks = list(ax_ts.get_xticks())
-    last_tick = date2num(pd.Timestamp("2014-12-01"))
-    if last_tick not in xticks:
-        xticks.append(last_tick)
-    # 去重并排序
-    xticks = sorted(set(xticks))
-    ax_ts.set_xticks(xticks)
     ax_ts.tick_params(axis="x", labelsize=8, rotation=0)
 
     fig.subplots_adjust(left=0.09, right=0.97, top=0.97, bottom=0.07,
@@ -279,10 +298,23 @@ def compute_limits() -> tuple[dict, dict]:
 
 
 # ═══════════════════════════════════════════════════════════════
+#  自动计算步长
+# ═══════════════════════════════════════════════════════════════
+
+def auto_step(total_days: int, target_sec: float = 10,
+              frame_duration: float = 0.12) -> int:
+    """根据总天数和目标播放时长，计算最优帧间隔。"""
+    n_frames = max(1, int(target_sec / frame_duration))
+    step = max(1, total_days // n_frames)
+    return step
+
+
+# ═══════════════════════════════════════════════════════════════
 #  Preview（最后一帧）
 # ═══════════════════════════════════════════════════════════════
 
-def render_preview(preview_path: Path | None = None) -> dict:
+def render_preview(preview_path: Path | None = None,
+                  xaxis_mode: str = "fixed") -> dict:
     """生成最后一帧预览，返回渲染参数供后续使用。"""
     _setup_style()
 
@@ -299,7 +331,7 @@ def render_preview(preview_path: Path | None = None) -> dict:
         preview_path = PROJECT_ROOT / "frames" / "_preview_flux.png"
 
     print(f"\n渲染最后一帧预览 → {preview_path}")
-    render_frame(df, len(df) - 1, preview_path, y_limits, scatter_limits)
+    render_frame(df, len(df) - 1, preview_path, y_limits, scatter_limits, xaxis_mode)
     print(f"  [OK] Preview: {preview_path}")
 
     # 返回参数供后续使用
@@ -315,16 +347,22 @@ def render_preview(preview_path: Path | None = None) -> dict:
 # ═══════════════════════════════════════════════════════════════
 
 def render_all(
-    step: int = FRAME_STEP,
+    step: int | None = None,
+    target_duration: float = TARGET_DURATION,
     make_gif_output: bool = True,
+    xaxis_mode: str = "fixed",
 ) -> None:
-    """逐帧渲染 + 合成 GIF。先自动生成 preview 获取参数。"""
-    # 先生成 preview 获取参数
-    params = render_preview()
+    """逐帧渲染 + 合成 GIF。"""
+    params = render_preview(xaxis_mode=xaxis_mode)
 
     df = params["df"]
     y_limits = params["y_limits"]
     scatter_limits = params["scatter_limits"]
+
+    # 自动计算步长
+    if step is None:
+        step = auto_step(len(df), target_duration, GIF_DURATION)
+        print(f"  自动步长: {step} 天/帧 (目标 {target_duration}s, {GIF_DURATION}s/帧)")
 
     # 清空帧目录
     import shutil
@@ -341,7 +379,7 @@ def render_all(
         frame_path = FRAMES_DIR / f"frame_{idx:05d}.png"
         if frame_path.exists():
             continue
-        render_frame(df, idx, frame_path, y_limits, scatter_limits)
+        render_frame(df, idx, frame_path, y_limits, scatter_limits, xaxis_mode)
 
     print(f"\n帧已保存至: {FRAMES_DIR}")
 
@@ -361,16 +399,28 @@ def main():
     parser = argparse.ArgumentParser(description="通量站点时间序列+散点动图")
     parser.add_argument("--preview", action="store_true", default=False,
                         help="仅生成最后一帧预览")
-    parser.add_argument("--step", type=int, default=FRAME_STEP,
-                        help=f"帧间隔（天），默认 {FRAME_STEP}")
+    parser.add_argument("--step", type=int, default=None,
+                        help="帧间隔（天），默认自动根据 --duration 计算")
+    parser.add_argument("--duration", type=float, default=TARGET_DURATION,
+                        help=f"目标 GIF 播放时长（秒），默认 {TARGET_DURATION}")
     parser.add_argument("--no-gif", action="store_true", default=False,
                         help="不合成 GIF")
+    parser.add_argument("--xmode", choices=["fixed", "auto"], default="fixed",
+                        help="X轴模式: fixed=全程固定 | auto=随帧扩展")
     args = parser.parse_args()
 
+    # 根据 xmode 调整输出子目录
+    global OUTPUT_DIR, FRAMES_DIR
+    suffix = "_auto" if args.xmode == "auto" else ""
+    OUTPUT_DIR = PROJECT_ROOT / f"output/flux_ts{suffix}"
+    FRAMES_DIR = PROJECT_ROOT / f"frames/flux_ts{suffix}"
+
     if args.preview:
-        render_preview()
+        render_preview(xaxis_mode=args.xmode)
     else:
-        render_all(step=args.step, make_gif_output=not args.no_gif)
+        render_all(step=args.step, target_duration=args.duration,
+                   make_gif_output=not args.no_gif,
+                   xaxis_mode=args.xmode)
 
 
 if __name__ == "__main__":
