@@ -168,6 +168,8 @@ def render_frame(
         # 刻度
         ax_ts.tick_params(labelsize=8)
         ax_ts.yaxis.set_major_locator(MaxNLocator(nbins=5))
+        # 统一 X 轴范围
+        ax_ts.set_xlim(date_min, date_max)
         # 隐藏上方两行时间序列的 X 刻度标签
         if i < 2:
             ax_ts.tick_params(axis="x", labelbottom=False)
